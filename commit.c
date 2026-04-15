@@ -62,12 +62,14 @@ int commit_parse(const void *data, size_t len, Commit *commit_out) {
     ts = (uint64_t)strtoull(last_space + 1, NULL, 10);
     *last_space = '\0';
     strncpy(commit_out->author, author_buf, sizeof(commit_out->author) - 1);
+    commit_out->author[sizeof(commit_out->author) - 1] = '\0';
     commit_out->timestamp = ts;
     p = strchr(p, '\n') + 1;  // skip author line
     p = strchr(p, '\n') + 1;  // skip committer line
     p = strchr(p, '\n') + 1;  // skip blank line
 
     strncpy(commit_out->message, p, sizeof(commit_out->message) - 1);
+    commit_out->message[sizeof(commit_out->message) - 1] = '\0';
     return 0;
 }
 
@@ -162,7 +164,7 @@ int head_update(const ObjectID *new_commit) {
         snprintf(target_path, sizeof(target_path), "%s", HEAD_FILE); // Detached HEAD
     }
 
-    char tmp_path[512];
+    char tmp_path[1024];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", target_path);
     
     f = fopen(tmp_path, "w");
@@ -170,13 +172,32 @@ int head_update(const ObjectID *new_commit) {
     
     char hex[HASH_HEX_SIZE + 1];
     hash_to_hex(new_commit, hex);
-    fprintf(f, "%s\n", hex);
-    
-    fflush(f);
-    fsync(fileno(f));
-    fclose(f);
-    
-    return rename(tmp_path, target_path);
+    if (fprintf(f, "%s\n", hex) < 0 ||
+        fflush(f) != 0 ||
+        fsync(fileno(f)) != 0 ||
+        fclose(f) != 0) {
+        unlink(tmp_path);
+        return -1;
+    }
+
+    if (rename(tmp_path, target_path) != 0) {
+        unlink(tmp_path);
+        return -1;
+    }
+
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "%s", target_path);
+    char *slash = strrchr(dir_path, '/');
+    if (slash) {
+        *slash = '\0';
+        int dir_fd = open(dir_path, O_RDONLY);
+        if (dir_fd >= 0) {
+            fsync(dir_fd);
+            close(dir_fd);
+        }
+    }
+
+    return 0;
 }
 
 // ─── TODO: Implement these ───────────────────────────────────────────────────
@@ -194,8 +215,30 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
-    (void)message; (void)commit_id_out;
-    return -1;
+    if (!message || !commit_id_out) return -1;
+
+    Commit commit;
+    memset(&commit, 0, sizeof(commit));
+
+    if (tree_from_index(&commit.tree) != 0) return -1;
+
+    if (head_read(&commit.parent) == 0) {
+        commit.has_parent = 1;
+    } else {
+        commit.has_parent = 0;
+    }
+
+    snprintf(commit.author, sizeof(commit.author), "%s", pes_author());
+    commit.timestamp = (uint64_t)time(NULL);
+    snprintf(commit.message, sizeof(commit.message), "%s", message);
+
+    void *data;
+    size_t len;
+    if (commit_serialize(&commit, &data, &len) != 0) return -1;
+
+    int rc = object_write(OBJ_COMMIT, data, len, commit_id_out);
+    free(data);
+    if (rc != 0) return -1;
+
+    return head_update(commit_id_out);
 }

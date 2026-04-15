@@ -10,11 +10,20 @@ test_tree
 # PES repository (created during testing)
 .pes/
 
+# Local tool/session files
+.codex
+
+# Scratch files created by manual lab runs
+bye.txt
+file.txt
+file1.txt
+file2.txt
+hello.txt
+
 # Editor files
 *.swp
 *.swo
 *~
 .vscode/
 .idea/
-
 
