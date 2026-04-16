@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
+#include <time.h>
 
 #define INDEX_MODE_FILE 0100644
 #define INDEX_MODE_EXEC 0100755
